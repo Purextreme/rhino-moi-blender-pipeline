@@ -1,6 +1,6 @@
 """Execute in Blender through MCP; provide ACTION and CONFIG globals.
 
-Actions are deliberately separate commit points: import, plan, rebuild, verify.
+Actions separate import/planning, rebuild with default cleanup/audit, and verification.
 """
 import hashlib
 import itertools
@@ -8,6 +8,7 @@ import json
 import math
 import pathlib
 import re
+import runpy
 
 import bpy
 import numpy as np
@@ -324,6 +325,9 @@ def build_object_hierarchy(scene, manifest, root, root_collection):
 def rebuild(cfg):
     scene = get_scene(cfg)
     assert bpy.context.scene == scene and scene['rhino_stage'] == 'imported'
+    for key in ('cleanup_path','cleanup_backup_path'):
+        path = pathlib.Path(cfg[key])
+        assert path.is_absolute() and path.parent.is_dir() and not path.exists(), 'Require a new cleanup path: ' + key
     plan = read_json(cfg['plan_path'])
     manifest = read_json(cfg['occurrences_path'])
     assert plan['request_id'] == cfg['request_id'] == manifest['metadata_request_id']
@@ -398,7 +402,12 @@ def rebuild(cfg):
     scene['rhino_plan_path'] = cfg['plan_path']
     bpy.context.view_layer.update()
     bpy.ops.ed.undo_push(message='Rhino hierarchy reconstructed')
-    return verify(cfg)
+    conversion = verify(cfg)
+    cleanup = cleanup_entry('clean', cfg)
+    normals = audit_normals(cfg)
+    return {**conversion, **cleanup, 'conversion_verified_before_cleanup': True,
+            'normal_orientation_counts': normals['counts'],
+            'normal_orientation_attention': normals['needs_user_notice']}
 
 
 def verify(cfg):
@@ -466,7 +475,10 @@ def verify(cfg):
         assert obj.hide_get() == (not block['source_metadata']['effective_visible'])
         assert obj.hide_render == (not block['source_metadata']['effective_visible'])
         assert obj.hide_select == block['source_metadata']['effective_locked']
-        expected = mapping @ np.array(block['world_matrix']) @ np.linalg.inv(mapping)
+        # Match Blender's float32 matrix representation used during creation;
+        # float64 inversion can differ by one ULP for scaled Block occurrences.
+        blender_mapping = Matrix(plan['mapping']['matrix'])
+        expected = np.array(blender_mapping @ Matrix(block['world_matrix']) @ blender_mapping.inverted())
         assert np.allclose(np.array(obj.matrix_world),expected,rtol=0,atol=1e-7)
     prior = json.loads(scene['rhino_prior_objects'])
     for name,before in prior.items():
@@ -485,6 +497,18 @@ def verify(cfg):
             'source_to_blender':plan['mapping']['matrix'],'blend_saved':bool(bpy.data.filepath)}
 
 
+def cleanup_entry(action, cfg):
+    path = pathlib.Path(main.__code__.co_filename).with_name('blender_cleanup.py')
+    return runpy.run_path(str(path), run_name='pipeline_cleanup')['main'](action, cfg)
+
+
+def audit_normals(cfg):
+    scene = get_scene(cfg)
+    root = scene.objects[cfg['root_name']]
+    path = pathlib.Path(main.__code__.co_filename).with_name('blender_normals_audit.py')
+    return runpy.run_path(str(path), run_name='pipeline_normals')['audit'](scene,[root]+list(root.children_recursive))
+
+
 def main(action, cfg):
     if action == 'import':
         return import_model(cfg)
@@ -495,7 +519,15 @@ def main(action, cfg):
     if action == 'rebuild':
         return rebuild(cfg)
     if action == 'verify':
+        stage = get_scene(cfg).get('rhino_cleanup_stage')
+        assert stage != 'cleaning', 'Cleanup incomplete; inspect before retry'
+        if stage == 'cleaned':
+            return cleanup_entry('verify', cfg)
         return verify(cfg)
+    if action == 'verify_cleanup':
+        return cleanup_entry('verify', cfg)
+    if action == 'audit_normals':
+        return audit_normals(cfg)
     raise ValueError('Unsupported action: ' + action)
 
 

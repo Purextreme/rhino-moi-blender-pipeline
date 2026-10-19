@@ -65,7 +65,7 @@ Reconstruction must use the checked plan and unchanged FBX/sidecar hashes. Valid
 
 Create one model packaging Collection and a root Empty. Represent full Layer paths and nested Block occurrences with Empty parent objects. A mesh or Block attaches to the appropriate Layer Empty within its enclosing Block scope; repeat Layer paths inside different Block scopes when necessary to preserve both hierarchies. Only create Layer nodes that lead to imported objects; retain populated sublayer ancestors and omit entirely empty branches. Do not delete hidden meshes, source geometry or unrelated data as cleanup. Block transforms are `source_to_blender @ source_world_matrix @ inverse(source_to_blender)`. Reparent meshes and Blocks with a saved `matrix_world`, then restore it and update the dependency graph. Keep imported mesh data and materials intact. Source visibility/locking should be represented on the new data only; retain original Layer/Block IDs and full paths as properties even when Blender adds name suffixes.
 
-Inspect both MCP and script result fields. After a separate read-only `verify`, require:
+Inspect both MCP and script result fields. The reconstruction first runs strict import verification before its default cleanup. Require at that boundary:
 
 - one imported group for every supported source occurrence and no unassigned meshes;
 - expected Layer/Block Empty parent graph, one model Collection, and no unused Layer branches;
@@ -77,13 +77,21 @@ Inspect both MCP and script result fields. After a separate read-only `verify`, 
 
 Frame the imported model in a 3D View and inspect a screenshot. Viewport shading can improve readability without replacing materials or changing geometry. A framing failure is not an import failure. Keep preview rigs separate from model contents when an appearance finish needs a render. Final `.blend` saving still requires the user's requested destination or approval.
 
+## Default post-processing
+
+Follow [post-processing.md](post-processing.md). `rebuild` automatically bakes Scale/delta Scale to one after strict conversion checks. It conditionally centers mesh origins when all mesh origins share world zero, preserves intentional group pivots and texture controls, verifies original/evaluated world geometry, normals and UVs against a separate cleanup receipt, and audits outward orientation. Local coordinates and object matrices intentionally change; preserve the original reconstruction plan instead of overwriting it. Supply new cleanup receipt/backup paths before `rebuild`.
+
+Call `verify` independently after rebuilding and viewport framing; after cleanup it checks the cleanup receipt and input hashes. Use `audit_normals` for details and inspect Face Orientation. Report suspected inward and uncertain open/cavity/self-intersecting objects with names/reasons; do not blanket recalculate custom normals. On an already edited scene, preserve current contents and use the guarded standalone cleanup rather than rerunning the old reconstruction.
+
 ## Final artifact consolidation
 
-Use `<original source folder>\codex_export_fbx` by default; an unsaved source uses the task's writable outputs directory. Use distinct filenames for the Rhino 5 copy, MoI FBX, metadata, occurrence sidecar, reconstruction plan and any protection copy retained for recovery.
+Use `<original source folder>\codex_export_fbx` by default; an unsaved source uses the task's writable outputs directory. Use distinct filenames for the Rhino 5 copy, MoI FBX, metadata, occurrence sidecar, reconstruction plan, cleanup receipt and any protection copy retained for recovery.
 
-Resolve exact paths and compare SHA-256 before any collision cleanup. Reuse identical destination files and delete only verified transport duplicates. Refuse to overwrite differing files. Switch the pipeline Scene's manifest/plan paths to the consolidated files, and verify again with those paths. A sidecar's original `transport_path` is historical export provenance; use consolidated paths for future reimports.
+Resolve exact paths and compare SHA-256 before any collision cleanup. Reuse identical destination files and delete only verified transport duplicates. Refuse to overwrite differing files. Switch the pipeline Scene's manifest/plan/cleanup paths to the consolidated files, pass those paths to `verify`, and verify again. Cleanup input hashes allow a relocated input only when its bytes match. Historical paths inside sidecars/receipts remain provenance; use consolidated paths for future operations.
 
 Remove a temporary transport directory only after proving it empty, without recursive deletion. Keep scripts and model-specific results separate.
+
+After strict consolidation verification, link normal findings into separate review Collections as described in [post-processing.md](post-processing.md#review-collections). Preserve original memberships and parents and verify this membership-only organization separately; do not rerun the strict baseline verifier and disguise the expected membership difference as a successful unchanged check.
 
 ## Optional appearance and completion
 
