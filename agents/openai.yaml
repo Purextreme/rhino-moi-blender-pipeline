@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rhino MoI Blender Pipeline"
+  short_description: "将 Rhino 模型经 MoI 导入 Blender，重建图层与 Block 层级并验证法线和比例"
+  default_prompt: "使用 $rhino-moi-blender-pipeline，将当前 Rhino 模型经 MoI 导入已打开的 Blender，保留源文件并验证层级、法线和比例。"
